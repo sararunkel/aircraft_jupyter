@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+import xarray as xr
+import argparse, os
+import datetime as dt
+import numpy as np
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
+def merge_datasets(file1, file2):
+    # Open the datasets
+    ds = xr.open_dataset(file1)  # Open the data file
+    ds2 = xr.open_dataset(file2)  # Open the WVISO data file
+    
+    parsed_date = dt.datetime.strptime(ds.FlightDate, '%m/%d/%Y').strftime('%Y-%m-%dT00:00:00') ## Get the flight date to convert the time as seconds since midnight
+    ##Convert the time to seconds since midnight
+    reference_date = np.datetime64(parsed_date)
+    time_deltas = ds2.Time.astype('timedelta64[s]')
+    datetime_values = reference_date + time_deltas
+    ds2['Time'] = datetime_values
+    #Match up the time of the two datasets
+    ds2 = ds2.sel(Time =slice(ds.Time[0], ds.Time[-1]))
+    
+    #Replace the WVISO variables in the original dataset with the ones from the WVISO dataset
+    for v in ds2.data_vars:
+        ds[v].values = ds2[v].values ##Only replace the values -- keep attributes from original dataset
+        if 'actual_range' in ds[v].attrs:
+            minim = ds[v].min().values
+            maxim = ds[v].max().values
+            ds[v].attrs['actual_range'] =np.array([minim,maxim],dtype='float32') ##Update the actual range attribute
+    
+    # Save the result back to file1
+    temp_file = file1 + '.tmp'
+    ds.to_netcdf(temp_file)
+    os.replace(temp_file, file1)
+    print(f"Merged dataset saved to {file1}")
+
+def main():
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Merge WVISO data into the main dataset.')
+    parser.add_argument('file1', type=str, help='Path to the main data file (will be overwritten)')
+    parser.add_argument('file2', type=str, help='Path to the WVISO data file')
+    args = parser.parse_args()
+    
+    # Merge the datasets
+    merge_datasets(args.file1, args.file2)
+
+if __name__ == '__main__':
+    main()
